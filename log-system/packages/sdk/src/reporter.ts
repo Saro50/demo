@@ -22,17 +22,20 @@ export interface ReporterOptions {
   endpoint: string;
   retryInterval: number;
   maxRetries: number;
+  appToken?: string;
 }
 
 export class Reporter {
   private endpoint: string;
   private retryInterval: number;
   private maxRetries: number;
+  private appToken: string;
 
   constructor(options: ReporterOptions) {
     this.endpoint = options.endpoint;
     this.retryInterval = options.retryInterval;
     this.maxRetries = options.maxRetries;
+    this.appToken = options.appToken || '';
   }
 
   /**
@@ -50,12 +53,17 @@ export class Reporter {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000); // 10s 超时
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-trace-id': logs[0].trace_id,
+      };
+      if (this.appToken) {
+        headers['x-app-token'] = this.appToken;
+      }
+
       const response = await fetch(this.endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-trace-id': logs[0].trace_id,
-        },
+        headers,
         body: JSON.stringify({ logs }),
         signal: controller.signal,
       });

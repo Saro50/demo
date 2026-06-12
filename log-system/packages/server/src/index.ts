@@ -30,7 +30,8 @@ import { traceMiddleware } from './middleware/trace.js';
 import logsRouter from './routes/logs.js';
 import tracesRouter from './routes/traces.js';
 import statsRouter from './routes/stats.js';
-import { getDb, closeDb } from './db/db.js';
+import appsRouter from './routes/apps.js';
+import { closeDb, ensureDbReady } from './db/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -40,7 +41,11 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
 // ==================== 中间件 ====================
 
-app.use(cors({ origin: CORS_ORIGIN }));
+app.use(cors({
+  origin: CORS_ORIGIN,
+  allowedHeaders: ['Content-Type', 'x-app-token', 'x-trace-id', 'x-span-id', 'x-parent-span-id'],
+  exposedHeaders: ['x-trace-id'],
+}));
 app.use(express.json({ limit: '1mb' })); // 限制请求体大小
 app.use(traceMiddleware);
 
@@ -66,6 +71,7 @@ app.get('/', (_req, res) => {
 app.use('/api/logs', logsRouter);
 app.use('/api/traces', tracesRouter);
 app.use('/api/stats', statsRouter);
+app.use('/api/apps', appsRouter);
 
 // 健康检查
 app.get('/api/health', (_req, res) => {
@@ -75,8 +81,8 @@ app.get('/api/health', (_req, res) => {
 // ==================== 启动 ====================
 
 async function main() {
-  // 初始化数据库（确保表存在）
-  getDb();
+  // 数据库自举：同步 Schema + 确保默认 app 存在
+  const { demoToken } = await ensureDbReady();
 
   app.listen(PORT, () => {
     console.log(`
@@ -94,23 +100,26 @@ async function main() {
 ║    GET  /api/health   - Health check     ║
 ║                                          ║
 ║  DB: ${process.env.LOG_DB_PATH || './data/logs.db'}  ║
+${demoToken ? `║                                          ║
+║  🔑 Demo Token: ${demoToken}  ║` : ''}
 ╚══════════════════════════════════════════╝
     `);
   });
 }
 
 // 优雅关闭
-process.on('SIGINT', () => {
-  console.log('[LogServer] Shutting down...');
-  closeDb();
+async function shutdown(signal: string): Promise<void> {
+  console.log(`[LogServer] Received ${signal}, shutting down...`);
+  try {
+    await closeDb();
+  } catch (err) {
+    console.error('[LogServer] Error during shutdown:', err);
+  }
   process.exit(0);
-});
+}
 
-process.on('SIGTERM', () => {
-  console.log('[LogServer] Shutting down...');
-  closeDb();
-  process.exit(0);
-});
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 main().catch((err) => {
   console.error('[LogServer] Fatal error:', err);

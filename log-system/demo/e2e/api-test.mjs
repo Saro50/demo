@@ -13,8 +13,22 @@
  *   ✓ GET  /api/health — 健康检查
  */
 
+import path from 'path';
+
 const BASE = process.env.API_BASE || 'http://localhost:3100';
-const API = path => `${BASE}${path}`;
+const API = urlPath => `${BASE}${urlPath}`;
+
+// 测试用 token
+// 优先级：1. 环境变量 LOG_DEFAULT_TOKEN  2. 从数据库读取（服务器自动 seed 的 demo app）
+const TEST_TOKEN = process.env.LOG_DEFAULT_TOKEN || await (async () => {
+  const Database = (await import('better-sqlite3')).default;
+  const dbPath = process.env.LOG_DB_PATH || path.resolve(import.meta.dirname, '../../packages/server/data/logs.db');
+  const db = new Database(dbPath);
+  const row = db.prepare('SELECT token FROM apps ORDER BY id ASC LIMIT 1').get();
+  db.close();
+  if (!row) throw new Error('No apps found in database. Start the server first.');
+  return row.token;
+})();
 
 let passed = 0;
 let failed = 0;
@@ -111,10 +125,10 @@ async function testLogCrud() {
     ],
   };
 
-  // POST /api/logs
+  // POST /api/logs（需携带 x-app-token 认证）
   const postRes = await fetch(API('/api/logs'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-app-token': TEST_TOKEN },
     body: JSON.stringify(payload),
   });
   expect(postRes.status, 'POST status').toBe(200);
@@ -182,7 +196,7 @@ async function testStats() {
 async function testValidation() {
   const res = await fetch(API('/api/logs'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-app-token': TEST_TOKEN },
     body: JSON.stringify({
       logs: [
         { level: 'info', message: 'missing trace_id and span_id' },

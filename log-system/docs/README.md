@@ -11,6 +11,7 @@
 | [CONFIGURATION.md](./CONFIGURATION.md) | 需要调整系统配置的运维/开发人员 |
 | [TESTING.md](./TESTING.md) | 需要编写测试或验证系统功能的开发者 |
 | [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | 遇到问题需要排查的人 |
+| [SKILL_AI_QUERY.md](./SKILL_AI_QUERY.md) | **AI 排障技能** — 用于 AI 通过日志 API 查询数据、排查问题 |
 
 ## 设计原则
 

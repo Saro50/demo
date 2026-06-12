@@ -54,6 +54,8 @@ export interface LogEntry {
   message: string;
   data?: Record<string, unknown>;
   source: LogSource;
+  app_name?: string;
+  app_id?: number;
   user_id?: string;
   url?: string;
   user_agent?: string;
@@ -93,6 +95,7 @@ export interface LogQueryParams {
   category?: LogCategory | LogCategory[];
   event_key?: string;
   trace_id?: string;
+  app_name?: string;
   user_id?: string;
   keyword?: string;
   start_time?: number;
@@ -163,6 +166,8 @@ export interface LoggerConfig {
   maxRetries?: number;
   /** 脱敏开关，默认 true */
   sanitize?: boolean;
+  /** 应用 token，用于服务端认证（需在后台手动创建应用获取） */
+  appToken?: string;
 }
 
 export const DEFAULT_LOGGER_CONFIG: LoggerConfig = {

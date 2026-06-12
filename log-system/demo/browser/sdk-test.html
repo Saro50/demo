@@ -51,7 +51,18 @@
 <div class="config-row">
   <label>后端地址:</label>
   <input id="endpoint" value="http://localhost:3100/api/logs" placeholder="http://localhost:3100/api/logs" />
-  <button class="btn btn-primary" onclick="initSDK()">初始化 SDK</button>
+</div>
+
+<!-- App Token -->
+<div class="config-row">
+  <label>App Token:</label>
+  <input id="appToken" value="" placeholder="从服务端 seed 输出中获取，如 tok_default_xxx" style="width:360px" />
+  <button class="btn btn-outline" onclick="fetchTokenHint()">🔄 获取可用 Token</button>
+  <span id="tokenStatus" style="font-size:12px;color:#999"></span>
+</div>
+
+<div class="config-row">
+  <button class="btn btn-primary" onclick="initSDK()">🚀 初始化 SDK</button>
 </div>
 
 <!-- 用户标识 -->
@@ -130,10 +141,45 @@ function updateUserDisplay(userId) {
 }
 
 // 暴露到 window 供 onclick 调用
+/** 获取可用 App 列表（仅用于验证后端连通性，token 需从服务端启动日志获取） */
+window.fetchTokenHint = async function() {
+  const endpoint = document.getElementById('endpoint').value;
+  const base = endpoint.replace('/api/logs', '');
+  const statusEl = document.getElementById('tokenStatus');
+  const tokenInput = document.getElementById('appToken');
+
+  try {
+    // 先验证连通性
+    const healthRes = await fetch(base + '/api/health');
+    if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
+
+    // 获取应用列表
+    const res = await fetch(base + '/api/apps');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const apps = await res.json();
+
+    if (apps.length === 0) {
+      statusEl.textContent = '⚠️ 暂无应用，服务启动时会自动创建，请重启或刷新';
+      statusEl.style.color = '#e65100';
+      return;
+    }
+
+    // 列出应用名（token 不公开，需从服务端启动日志获取）
+    const names = apps.map(a => a.name).join(', ');
+    statusEl.innerHTML = `✅ 服务正常，可用应用: ${names}。<br>👉 Token 见服务端启动横幅 <code>Demo Token: tok_demo_xxxx</code>`;
+    statusEl.style.color = '#15803d';
+  } catch (err) {
+    statusEl.textContent = `❌ 后端不可达: ${err.message}`;
+    statusEl.style.color = '#c62828';
+  }
+};
+
 window.initSDK = async function() {
   const endpoint = document.getElementById('endpoint').value;
+  const token = document.getElementById('appToken').value.trim();
   const statusEl = document.getElementById('initStatus');
 
+  // 1. 验证后端连通性
   try {
     const healthUrl = endpoint.replace('/api/logs', '/api/health');
     const res = await fetch(healthUrl);
@@ -146,35 +192,52 @@ window.initSDK = async function() {
     return;
   }
 
+  // 2. 校验 token（可选警告，不阻止初始化）
+  if (!token) {
+    statusEl.className = 'status pending';
+    statusEl.textContent = '⚠️ 未填写 App Token，上报会被服务端拒绝（403）';
+    logToUI('warn', '⚠️ 未设置 App Token，上报将返回 403 Forbidden');
+  } else {
+    // 验证 token 有效性
+    try {
+      const base = endpoint.replace('/api/logs', '');
+      const testRes = await fetch(base + '/api/apps');
+      if (testRes.ok) {
+        logToUI('info', `🔑 Token 已设置: ${token.slice(0, 16)}...`);
+      }
+    } catch { /* 静默，不影响初始化 */ }
+  }
+
+  // 3. 初始化 SDK
   Logger.init({
     endpoint,
     appName: 'demo-test',
     environment: 'test',
+    appToken: token || undefined,
     autoCapture: {
       error: true,
       promise: true,
       request: true,
       route: false,
       performance: false,
-      click: false,
+      click: true,
     },
   });
 
   statusEl.className = 'status ok';
-  statusEl.textContent = '✅ 已初始化';
+  statusEl.textContent = token ? '✅ 已初始化（带 Token）' : '✅ 已初始化（无 Token）';
+  logToUI('info', `SDK 初始化成功，上报地址: ${endpoint}`);
 
-  // 启用按钮
+  // 4. 启用按钮
   document.querySelectorAll('.toolbar .btn, #btnSetUser').forEach(b => b.disabled = false);
 
-  // 如果输入框中已有 userId，自动设置
+  // 5. 如果输入框中已有 userId，自动设置
   const userId = document.getElementById('userIdInput').value.trim();
   if (userId) {
     Logger.setUserId(userId);
     updateUserDisplay(userId);
     logToUI('info', `设置用户: ${userId}`);
   }
-
-  logToUI('info', 'SDK 初始化成功，上报地址: ' + endpoint);
 };
 
 window.setUserId = function() {

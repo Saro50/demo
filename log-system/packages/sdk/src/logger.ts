@@ -59,6 +59,8 @@ class LoggerImpl implements LoggerInstance {
   private _initialized = false;
   /** 上一步的 span_id，用于自动填充被动捕获的 parent_span_id */
   private lastSpanId: string | null = null;
+  /** 按需刷新的定时器（有日志时才存在，空队列时 null） */
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.config = { ...DEFAULT_LOGGER_CONFIG };
@@ -67,6 +69,7 @@ class LoggerImpl implements LoggerInstance {
       endpoint: this.config.endpoint,
       retryInterval: this.config.retryInterval!,
       maxRetries: this.config.maxRetries!,
+      appToken: this.config.appToken,
     });
     this.userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
 
@@ -91,16 +94,14 @@ class LoggerImpl implements LoggerInstance {
       endpoint: this.config.endpoint,
       retryInterval: this.config.retryInterval!,
       maxRetries: this.config.maxRetries!,
+      appToken: this.config.appToken,
     });
 
     // 启动被动捕获
     this.cleanupPassive = setupPassiveCapture(this.config, this);
 
-    // 启动调度器：每 2s 检查队列，有数据则上报
-    this.schedulerTimer = setInterval(() => {
-      this._flushBatch();
-    }, 2000);
-
+    // 调度器改为按需触发：有日志入队时才启动定时器
+    // 空队列时无任何定时器运行，零开销
     this._initialized = true;
 
     console.log(`[LogSystem] Initialized: app=${this.config.appName} env=${this.config.environment}`);
@@ -135,6 +136,7 @@ class LoggerImpl implements LoggerInstance {
         ? sanitizeData(partial.data)
         : (partial.data || {}),
       source: 'frontend',
+      app_name: partial.app_name || this.config.appName,
       user_id: partial.user_id || this.userId,
       url: partial.url || (typeof window !== 'undefined' ? window.location.href : undefined),
       user_agent: this.userAgent,
@@ -153,7 +155,9 @@ class LoggerImpl implements LoggerInstance {
       createdAt: Date.now(),
     };
 
-    this.queue.push(queueItem).catch((err) => {
+    this.queue.push(queueItem).then(() => {
+      this._scheduleFlush();
+    }).catch((err) => {
       console.warn('[LogSystem] Queue push failed:', err);
     });
   }
@@ -189,7 +193,18 @@ class LoggerImpl implements LoggerInstance {
     });
   }
 
-  /** 批量刷新 - 定时调度 */
+  /** 按需调度刷新：有日志入队后延迟 2s 执行，多次入队会重置计时（防抖） */
+  private _scheduleFlush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+    }
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      this._flushBatch();
+    }, 2000);
+  }
+
+  /** 批量刷新 - 从队列取数据上报，成功后递归调度直到队列清空 */
   private async _flushBatch(): Promise<void> {
     try {
       const count = await this.queue.count();
@@ -223,9 +238,17 @@ class LoggerImpl implements LoggerInstance {
           await this.queue.updateRetry(item.id, item.retryCount + 1);
         }
       }
+
+      // 如果队列中还有剩余数据，继续调度下一批
+      const remaining = await this.queue.count();
+      if (remaining > 0) {
+        this._scheduleFlush();
+      }
     } catch (err) {
       // 静默失败，下次调度继续
       console.warn('[LogSystem] Flush error:', err);
+      // 发生错误时也重试，避免丢日志
+      this._scheduleFlush();
     }
   }
 
@@ -249,6 +272,10 @@ class LoggerImpl implements LoggerInstance {
 
   /** 销毁 - 清理定时器和被动捕获 */
   destroy(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
     if (this.schedulerTimer) {
       clearInterval(this.schedulerTimer);
       this.schedulerTimer = null;

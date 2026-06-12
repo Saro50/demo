@@ -1,0 +1,64 @@
+// Prisma Schema — 主数据模型
+// 切换数据库（SQLite → PostgreSQL）只需改 provider 和连接字符串
+
+generator client {
+  provider      = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model App {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  token     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  logs Log[]
+
+  @@map("apps")
+}
+
+model Log {
+  id            String   @id
+  traceId       String   @map("trace_id")
+  spanId        String   @map("span_id")
+  parentSpanId  String?  @map("parent_span_id")
+  level         String
+  category      String
+  eventKey      String?  @map("event_key")
+  message       String?
+  data          String?
+  source        String
+  appId         Int?     @map("app_id")
+  userId        String?  @map("user_id")
+  url           String?
+  userAgent     String?  @map("user_agent")
+  ip            String?
+  timestamp     Int
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  app App? @relation(fields: [appId], references: [id])
+
+  @@index([traceId], name: "idx_logs_trace_id")
+  @@index([level], name: "idx_logs_level")
+  @@index([category], name: "idx_logs_category")
+  @@index([timestamp], name: "idx_logs_timestamp")
+  @@index([appId], name: "idx_logs_app_id")
+  @@map("logs")
+}
+
+model Trace {
+  traceId     String   @id @map("trace_id")
+  rootSpanId  String   @map("root_span_id")
+  serviceName String   @default("web") @map("service_name")
+  startTime   Int      @map("start_time")
+  endTime     Int?     @map("end_time")
+  spanCount   Int      @default(0) @map("span_count")
+  hasError    Int      @default(0) @map("has_error")
+  summary     String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("traces")
+}

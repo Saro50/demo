@@ -1,23 +1,21 @@
 /**
- * 数据库初始化与连接管理
- * 
- * 使用 better-sqlite3（同步 API）而不是 sqlite3（回调 API）的原因：
- * - 同步 API 代码更简洁，避免回调地狱
- * - 日志写入是高频操作，同步 API 在单线程 Node.js 中反而更可控
- * - better-sqlite3 性能优于 sqlite3（直接绑定 C 库，无中间层）
- * 
- * 并发策略：
- * - SQLite WAL 模式，支持读写并发
- * - 写入时使用 IMMEDIATE 事务，避免多进程竞争
- * - 批量写入合并为单条 INSERT，减少事务开销
- * 
- * 表结构说明：
- * - logs：日志明细表，所有查询基于此表
- * - traces：链路汇总表，加速 traceID 查询
- *   每次写入 logs 时，检查 traces 是否存在，不存在则插入
- *   这样 traces 表是 logs 的聚合缓存，不影响主写入路径性能
+ * 数据库连接管理 — 基于 Prisma Client
+ *
+ * 运行时：Prisma Client（异步、类型安全、ORM 自动建表）
+ * 可视化管理：npx prisma studio（基于 prisma/schema.prisma）
+ *
+ * 切换为 PostgreSQL 的步骤：
+ *   1. 改 prisma/schema.prisma provider → "postgresql"
+ *   2. 改连接字符串环境变量 DATABASE_URL
+ *   3. 无需改动此文件
+ *
+ * 架构说明：
+ * 所有路由层统一通过 db.ts 导出的 prisma 实例访问数据库，
+ * 切换数据库源时只需改 schema 和连接字符串，路由层代码零改动。
  */
 
+import { PrismaClient } from '@prisma/client';
+import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -25,32 +23,29 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.LOG_DB_PATH || path.join(__dirname, '../../data/logs.db');
 
-// 确保 data 目录存在
 import fs from 'fs';
 const dbDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
-let db: Database.Database;
+/**
+ * 初始化数据库 Schema：用原生 SQL 创建表（幂等，CREATE TABLE IF NOT EXISTS）
+ *
+ * 为什么不用 prisma db push？
+ * 1. 子进程方式与 Prisma Client 冲突（数据库文件被占用）
+ * 2. 在 Prisma 接管前用原生 SQL 建表，简单可靠
+ * 3. Schema 与 prisma/schema.prisma 保持同步即可
+ */
+function initSchema(conn: Database.Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS apps (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL UNIQUE,
+      token       TEXT NOT NULL UNIQUE,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
 
-export function getDb(): Database.Database {
-  if (!db) {
-    db = new Database(DB_PATH, {
-      // WAL 模式：读写不互斥，显著提升并发性能
-      // 适合读多写多的日志场景
-    });
-    db.pragma('journal_mode = WAL');
-    db.pragma('busy_timeout = 5000');
-    db.pragma('synchronous = NORMAL');
-    initSchema(db);
-    console.log(`[LogServer] DB opened: ${DB_PATH}`);
-  }
-  return db;
-}
-
-function initSchema(db: Database.Database): void {
-  db.exec(`
     CREATE TABLE IF NOT EXISTS logs (
       id              TEXT PRIMARY KEY,
       trace_id        TEXT NOT NULL,
@@ -62,12 +57,14 @@ function initSchema(db: Database.Database): void {
       message         TEXT,
       data            TEXT,
       source          TEXT NOT NULL,
+      app_id          INTEGER,
       user_id         TEXT,
       url             TEXT,
       user_agent      TEXT,
       ip              TEXT,
       timestamp       INTEGER NOT NULL,
-      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (app_id) REFERENCES apps(id)
     );
 
     CREATE TABLE IF NOT EXISTS traces (
@@ -85,16 +82,103 @@ function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id);
     CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
     CREATE INDEX IF NOT EXISTS idx_logs_category ON logs(category);
-    CREATE INDEX IF NOT EXISTS idx_logs_event_key ON logs(event_key);
     CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_logs_app_id ON logs(app_id);
   `);
+  console.log('[LogServer] Schema initialized (tables created if not exist)');
+}
+
+/**
+ * 预配置数据库：创建表 + 设置 WAL 模式 + busy_timeout
+ * 在 Prisma Client 初始化之前执行，避免连接冲突
+ * WAL / synchronous 持久化到数据库文件头，后续所有连接自动继承
+ */
+function prepareDatabase(): void {
+  const conn = new Database(DB_PATH);
+  initSchema(conn);
+  conn.pragma('journal_mode = WAL');
+  conn.pragma('busy_timeout = 5000');
+  conn.pragma('synchronous = NORMAL');
+  conn.close();
+}
+
+let prisma!: PrismaClient;
+
+/**
+ * 获取 Prisma Client 单例
+ * 首次调用时初始化，后续复用同一实例
+ * 使用 @prisma/adapter-better-sqlite3 作为数据库驱动适配器
+ */
+export function getPrisma(): PrismaClient {
+  if (!prisma) {
+    // 在 Prisma 接管前用原生 better-sqlite3 建表 + 设置 WAL
+    prepareDatabase();
+
+    const adapter = new PrismaBetterSqlite3({
+      url: DB_PATH,
+      timeout: 5000,
+    });
+    prisma = new PrismaClient({
+      adapter,
+      log: process.env.NODE_ENV === 'development' ? ['query', 'warn', 'error'] : ['warn', 'error'],
+    });
+    console.log(`[LogServer] Prisma Client initialized (DB: ${DB_PATH})`);
+  }
+  return prisma;
+}
+
+// 模块级单例，供所有路由直接使用
+const db = getPrisma();
+export { db as prisma };
+
+export default prisma;
+
+/** 验证 app token，返回对应的 app 信息，无效返回 null */
+export async function validateAppToken(token: string): Promise<{ id: number; name: string } | null> {
+  if (!token) return null;
+  const app = await prisma.app.findUnique({
+    where: { token },
+    select: { id: true, name: true },
+  });
+  return app;
+}
+
+/** 获取所有应用列表（不暴露 token） */
+export async function getAllApps(): Promise<Array<{ id: number; name: string }>> {
+  return prisma.app.findMany({
+    select: { id: true, name: true },
+    orderBy: { name: 'asc' },
+  });
 }
 
 /** 关闭数据库连接 */
-export function closeDb(): void {
-  if (db) {
-    db.close();
-    console.log('[LogServer] DB closed');
+export async function closeDb(): Promise<void> {
+  if (prisma) {
+    await prisma.$disconnect();
+    console.log('[LogServer] Prisma Client disconnected');
   }
+}
+
+/**
+ * 确保数据库就绪：表已由 getPrisma() 中的 prepareDatabase() 创建
+ * 此函数检查是否有 app，没有则自动创建默认 demo 应用
+ *
+ * 首次启动自动执行，后续幂等。用户无需手动运行 seed。
+ */
+export async function ensureDbReady(): Promise<{ demoToken?: string }> {
+  // 检查是否有 app，没有则创建默认 demo 应用
+  const count = await prisma.app.count();
+  if (count === 0) {
+    const { v4: uuidv4 } = await import('uuid');
+    const demoToken = 'tok_demo_' + uuidv4();
+    await prisma.app.create({
+      data: { name: 'demo', token: demoToken },
+    });
+    console.log(`[LogServer] Created default app: demo  token: ${demoToken}`);
+    return { demoToken };
+  }
+
+  // 返回第一个 app 的 token 供启动信息展示
+  const first = await prisma.app.findFirst({ orderBy: { id: 'asc' } });
+  return { demoToken: first?.token };
 }

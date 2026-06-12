@@ -340,8 +340,8 @@ router.get('/', (_req: Request, res: Response) => {
         definitions: [
           'LoggerConfig — 初始化配置接口，所有字段均有注释说明',
           'LogEntry     — 日志条目结构，含 trace_id, span_id, level, category 等字段',
-          'LogLevel     — 'debug' | 'info' | 'warn' | 'error' | 'fatal'',
-          'LogCategory  — 'event' | 'exception' | 'request' | 'page' | 'performance'',
+          "LogLevel     — 'debug' | 'info' | 'warn' | 'error' | 'fatal'",
+          "LogCategory  — 'event' | 'exception' | 'request' | 'page' | 'performance'",
         ],
       },
     },

@@ -18,7 +18,7 @@ const DEFAULT_APPS = [
   { name: 'default', token: TEST_TOKEN || 'tok_default_' + uuidv4() },
   { name: 'web-app', token: 'tok_web_' + uuidv4() },
   { name: 'admin',   token: 'tok_admin_' + uuidv4() },
-  { name: 'api',     token: 'tok_api_' + uuidv4() },
+  { name: 'dash-boards',     token: 'tok_api_' + uuidv4() },
 ];
 
 let inserted = 0;

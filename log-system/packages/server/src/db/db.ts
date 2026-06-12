@@ -140,6 +140,7 @@ export async function validateAppToken(token: string): Promise<{ id: number; nam
     where: { token },
     select: { id: true, name: true },
   });
+  console.log('validateAppToken: token', token, 'app:', app);
   return app;
 }
 

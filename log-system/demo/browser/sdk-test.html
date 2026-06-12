@@ -140,20 +140,101 @@ function updateUserDisplay(userId) {
   }
 }
 
-// 暴露到 window 供 onclick 调用
-/** 获取可用 App 列表（仅用于验证后端连通性，token 需从服务端启动日志获取） */
+// ==================== 队列监控 ====================
+// 优先使用 Logger.getQueueDepth() API，兼容旧版降级到直接读 IndexedDB
+async function readQueueDepth() {
+  try {
+    // 优先使用 SDK 暴露的 API
+    if (typeof Logger.getQueueDepth === 'function') {
+      const depth = await Logger.getQueueDepth();
+      return depth;
+    }
+  } catch { /* fallback 到 IndexedDB 直读 */ }
+
+  try {
+    const req = indexedDB.open('log-system-queue', 1);
+    return new Promise((resolve) => {
+      req.onupgradeneeded = () => { resolve(0); };
+      req.onsuccess = (event) => {
+        const db = event.target.result;
+        const tx = db.transaction('logs', 'readonly');
+        const store = tx.objectStore('logs');
+        const countReq = store.count();
+        countReq.onsuccess = () => {
+          resolve(countReq.result);
+          db.close();
+        };
+        countReq.onerror = () => { resolve(-1); db.close(); };
+      };
+      req.onerror = () => { resolve(-1); };
+    });
+  } catch { return -1; }
+}
+
+async function updateQueueStatus() {
+  const el = document.getElementById('statQueued');
+  const depth = await readQueueDepth();
+  if (depth === -1) {
+    el.textContent = '—';
+    el.style.color = '#999';
+  } else if (depth === 0) {
+    el.textContent = '0';
+    el.style.color = '#15803d';
+  } else {
+    el.textContent = `${depth}`;
+    el.style.color = '#e65100';
+  }
+}
+
+// 每 3 秒刷新队列状态（仅在 SDK 初始化后）
+let queueMonitorTimer = null;
+function startQueueMonitor() {
+  if (queueMonitorTimer) clearInterval(queueMonitorTimer);
+  updateQueueStatus();
+  queueMonitorTimer = setInterval(updateQueueStatus, 3000);
+}
+
+// ==================== Token 验证 ====================
+/** 用测试 POST 真正验证 token 有效性 */
+async function validateToken(token, endpoint) {
+  try {
+    const testLog = {
+      trace_id: `__token_verify__${Date.now()}`,
+      span_id: 'verify',
+      parent_span_id: null,
+      level: 'debug',
+      category: 'event',
+      event_key: '__token_verify__',
+      message: 'Token verification test log',
+      source: 'frontend',
+      timestamp: Date.now(),
+    };
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-app-token': token },
+      body: JSON.stringify({ logs: [testLog] }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const reason = body.errors?.[0]?.reason || `HTTP ${res.status}`;
+      return { valid: false, reason };
+    }
+    return { valid: true, reason: '' };
+  } catch (err) {
+    return { valid: false, reason: `网络错误: ${err.message}` };
+  }
+}
+
+/** 获取可用 App 列表（便捷验证后端连通性，不返回 token 本身） */
 window.fetchTokenHint = async function() {
   const endpoint = document.getElementById('endpoint').value;
   const base = endpoint.replace('/api/logs', '');
   const statusEl = document.getElementById('tokenStatus');
-  const tokenInput = document.getElementById('appToken');
 
   try {
-    // 先验证连通性
     const healthRes = await fetch(base + '/api/health');
     if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
 
-    // 获取应用列表
     const res = await fetch(base + '/api/apps');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const apps = await res.json();
@@ -164,7 +245,6 @@ window.fetchTokenHint = async function() {
       return;
     }
 
-    // 列出应用名（token 不公开，需从服务端启动日志获取）
     const names = apps.map(a => a.name).join(', ');
     statusEl.innerHTML = `✅ 服务正常，可用应用: ${names}。<br>👉 Token 见服务端启动横幅 <code>Demo Token: tok_demo_xxxx</code>`;
     statusEl.style.color = '#15803d';
@@ -178,6 +258,7 @@ window.initSDK = async function() {
   const endpoint = document.getElementById('endpoint').value;
   const token = document.getElementById('appToken').value.trim();
   const statusEl = document.getElementById('initStatus');
+  let tokenValid = undefined; // true / false / undefined（未设置）
 
   // 1. 验证后端连通性
   try {
@@ -192,20 +273,18 @@ window.initSDK = async function() {
     return;
   }
 
-  // 2. 校验 token（可选警告，不阻止初始化）
+  // 2. 校验 token：用测试 POST 真正验证
   if (!token) {
-    statusEl.className = 'status pending';
-    statusEl.textContent = '⚠️ 未填写 App Token，上报会被服务端拒绝（403）';
+    tokenValid = false;
     logToUI('warn', '⚠️ 未设置 App Token，上报将返回 403 Forbidden');
   } else {
-    // 验证 token 有效性
-    try {
-      const base = endpoint.replace('/api/logs', '');
-      const testRes = await fetch(base + '/api/apps');
-      if (testRes.ok) {
-        logToUI('info', `🔑 Token 已设置: ${token.slice(0, 16)}...`);
-      }
-    } catch { /* 静默，不影响初始化 */ }
+    const result = await validateToken(token, endpoint);
+    tokenValid = result.valid;
+    if (result.valid) {
+      logToUI('info', `🔑 Token 验证通过: ${token.slice(0, 16)}...`);
+    } else {
+      logToUI('warn', `⚠️ Token 验证失败: ${result.reason}`);
+    }
   }
 
   // 3. 初始化 SDK
@@ -224,14 +303,30 @@ window.initSDK = async function() {
     },
   });
 
-  statusEl.className = 'status ok';
-  statusEl.textContent = token ? '✅ 已初始化（带 Token）' : '✅ 已初始化（无 Token）';
+  // 更新状态：综合显示
+  if (token === '') {
+    statusEl.className = 'status pending';
+    statusEl.textContent = '⚠️ 已初始化（无 Token，上报将被拒绝）';
+  } else if (tokenValid === true) {
+    statusEl.className = 'status ok';
+    statusEl.textContent = '✅ 已初始化（Token 已验证）';
+  } else if (tokenValid === false) {
+    statusEl.className = 'status pending';
+    statusEl.textContent = '⚠️ 已初始化（Token 无效，上报将被拒绝）';
+  } else {
+    statusEl.className = 'status ok';
+    statusEl.textContent = '✅ 已初始化（Token 未验证）';
+  }
+
   logToUI('info', `SDK 初始化成功，上报地址: ${endpoint}`);
 
   // 4. 启用按钮
   document.querySelectorAll('.toolbar .btn, #btnSetUser').forEach(b => b.disabled = false);
 
-  // 5. 如果输入框中已有 userId，自动设置
+  // 5. 启动队列监控
+  startQueueMonitor();
+
+  // 6. 如果输入框中已有 userId，自动设置
   const userId = document.getElementById('userIdInput').value.trim();
   if (userId) {
     Logger.setUserId(userId);
@@ -257,21 +352,25 @@ window.sendTrack = function() {
   sentCount++;
   updateSent();
   Logger.track('demo_button_click', { page: 'test-page', button_id: 'demo-btn-1' });
-  logToUI('info', 'track: demo_button_click');
+  logToUI('info', '📤 track: demo_button_click（已入队）');
+  // 延迟检查队列状态
+  setTimeout(updateQueueStatus, 500);
 };
 
 window.sendError = function() {
   sentCount++;
   updateSent();
   Logger.error('演示错误: 模拟业务异常', { code: 500, source: 'demo-test' });
-  logToUI('error', 'error: 演示错误');
+  logToUI('error', '📤 error: 演示错误（已入队）');
+  setTimeout(updateQueueStatus, 500);
 };
 
 window.sendInfo = function() {
   sentCount++;
   updateSent();
   Logger.info('演示信息日志', { action: 'demo', value: Math.random() });
-  logToUI('info', 'info: 演示信息日志');
+  logToUI('info', '📤 info: 演示信息日志（已入队）');
+  setTimeout(updateQueueStatus, 500);
 };
 
 window.triggerError = function() {

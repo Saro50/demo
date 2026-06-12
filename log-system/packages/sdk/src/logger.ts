@@ -270,6 +270,11 @@ class LoggerImpl implements LoggerInstance {
     }
   }
 
+  /** 获取队列深度（待发送日志数） */
+  getQueueDepth(): Promise<number> {
+    return this.queue.count();
+  }
+
   /** 销毁 - 清理定时器和被动捕获 */
   destroy(): void {
     if (this.flushTimer) {
@@ -331,5 +336,13 @@ export const Logger = {
   /** 获取内部实例，用于被动捕获引擎 */
   _getInstance(): LoggerInstance {
     return globalInstance;
+  },
+
+  /**
+   * 获取当前队列深度 — 待发送的日志数量
+   * 可用于 UI 展示或调试，返回 Promise<number>
+   */
+  getQueueDepth(): Promise<number> {
+    return globalInstance.getQueueDepth();
   },
 };

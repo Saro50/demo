@@ -96,9 +96,12 @@ function scheduleFlush(): void {
  * 需要 x-app-token 认证，无效 token 返回 403
  */
 router.post('/', async (req: Request, res: Response) => {
+  console.log('req.headers:',JSON.stringify(req.headers))
   // Token 认证
   const token = (req.headers['x-app-token'] as string) || '';
+  console.log('req.headers: token', token)
   const app = await validateAppToken(token);
+
   if (!app) {
     res.status(403).json({ accepted: 0, errors: [{ index: 0, reason: 'Forbidden: invalid or missing x-app-token' }] });
     return;

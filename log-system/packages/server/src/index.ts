@@ -31,6 +31,7 @@ import logsRouter from './routes/logs.js';
 import tracesRouter from './routes/traces.js';
 import statsRouter from './routes/stats.js';
 import appsRouter from './routes/apps.js';
+import docsRouter from './routes/docs.js';
 import { closeDb, ensureDbReady } from './db/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -72,6 +73,7 @@ app.use('/api/logs', logsRouter);
 app.use('/api/traces', tracesRouter);
 app.use('/api/stats', statsRouter);
 app.use('/api/apps', appsRouter);
+app.use('/api/docs', docsRouter);
 
 // 健康检查
 app.get('/api/health', (_req, res) => {
@@ -97,6 +99,7 @@ async function main() {
 ║    GET  /api/logs     - Query logs       ║
 ║    GET  /api/traces   - Trace detail     ║
 ║    GET  /api/stats    - Statistics       ║
+║    GET  /api/docs     - API document     ║
 ║    GET  /api/health   - Health check     ║
 ║                                          ║
 ║  DB: ${process.env.LOG_DB_PATH || './data/logs.db'}  ║

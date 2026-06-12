@@ -92,6 +92,8 @@ export function setupPassiveCapture(
   }
 
   // ==================== 网络请求 (fetch 包装) ====================
+  // 注意：Logger 初始化的 endpoint 可能在运行时被覆盖，所以只记录初始 endpoint 用于过滤
+  const logEndpoint = config.endpoint;
   if (config.autoCapture?.request !== false) {
     const originalFetch = window.fetch;
     window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
@@ -99,6 +101,13 @@ export function setupPassiveCapture(
       const traceId = getOrCreateTraceId();
       const spanId = generateSpanId();
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+
+      // 跳过向日志上报端点的请求（避免上报日志时自己又被记录，形成循环）
+      // 设计原因：Reporter.send() 会 POST 到 logEndpoint，如果也捕获会导致每条日志
+      // 额外产生一条 request 日志，且 IndexedDB 队列可能反复触发 flush 形成循环
+      if (logEndpoint && url.startsWith(logEndpoint)) {
+        return originalFetch.call(window, input, init);
+      }
 
       // 注入链路头（仅当请求头中尚未设置时，避免覆盖 Reporter 等内部组件已注入的值）
       const headers = new Headers(init?.headers);

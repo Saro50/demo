@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>短链接系统 - 功能演示</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔗</text></svg>">
+</head>
+<body>
+    <div class="container">
+        <!-- 顶部标题区域 -->
+        <header class="header">
+            <h1 class="header__title">🔗 短链接系统</h1>
+            <p class="header__subtitle">
+                输入长链接，一键生成短链接 · 支持自定义短码 · 自动记录访问次数
+            </p>
+            <div class="header__badges">
+                <span class="badge badge--python">Python Flask</span>
+                <span class="badge badge--sqlite">SQLite</span>
+                <span class="badge badge--mvp">MVP v1.0</span>
+            </div>
+        </header>
+
+        <!-- 创建短链接表单 -->
+        <section class="card form-section" aria-label="创建短链接">
+            <h2 class="card__title">✏️ 创建短链接</h2>
+            <form id="shortenForm" class="form">
+                <div class="form__group">
+                    <label for="urlInput" class="form__label">长链接 <span class="required">*</span></label>
+                    <input
+                        type="text"
+                        id="urlInput"
+                        class="form__input"
+                        placeholder="例如：https://www.example.com/very/long/url/that/needs/shortening"
+                        required
+                        autocomplete="url"
+                    />
+                    <span class="form__hint">请输入以 http:// 或 https:// 开头的完整链接</span>
+                </div>
+
+                <div class="form__group">
+                    <label for="customCodeInput" class="form__label">自定义短码 <span class="optional">(可选)</span></label>
+                    <input
+                        type="text"
+                        id="customCodeInput"
+                        class="form__input form__input--code"
+                        placeholder="例如：my-link（留空则系统自动生成）"
+                        maxlength="10"
+                        autocomplete="off"
+                    />
+                    <span class="form__hint">3-10 位字母、数字、下划线或连字符</span>
+                </div>
+
+                <div class="form__actions">
+                    <button type="submit" id="submitBtn" class="btn btn--primary">
+                        <span class="btn__icon">⚡</span>
+                        <span class="btn__text">生成短链接</span>
+                    </button>
+                    <button type="reset" id="resetBtn" class="btn btn--secondary">
+                        <span class="btn__icon">↺</span>
+                        <span class="btn__text">清空</span>
+                    </button>
+                </div>
+            </form>
+
+            <!-- 结果展示区域 -->
+            <div id="resultArea" class="result" style="display: none;">
+                <div class="result__divider"></div>
+                <div id="resultSuccess" class="result__success" style="display: none;">
+                    <span class="result__icon">✅</span>
+                    <span class="result__text">短链接生成成功！</span>
+                    <div class="result__url-box">
+                        <input type="text" id="shortUrlOutput" class="result__url" readonly />
+                        <button id="copyBtn" class="btn btn--small btn--copy" title="复制到剪贴板">
+                            📋 复制
+                        </button>
+                    </div>
+                    <div class="result__stats">
+                        <span>原始链接：<span id="resultOriginalUrl" class="result__truncated"></span></span>
+                    </div>
+                </div>
+                <div id="resultError" class="result__error" style="display: none;">
+                    <span class="result__icon">❌</span>
+                    <span id="errorMessage" class="result__text result__text--error"></span>
+                </div>
+            </div>
+        </section>
+
+        <!-- 链接列表 -->
+        <section class="card links-section" aria-label="已生成的短链接列表">
+            <h2 class="card__title">📊 已生成的短链接</h2>
+            <div class="links-section__toolbar">
+                <span id="linkCount" class="links-section__count">共 0 条记录</span>
+                <button id="refreshBtn" class="btn btn--small btn--refresh" title="刷新列表">
+                    🔄 刷新
+                </button>
+            </div>
+            <div id="linksList" class="links-list">
+                <!-- 由 JavaScript 动态渲染 -->
+                <div class="links-list__empty">
+                    <span class="links-list__empty-icon">📭</span>
+                    <span>暂无短链接，快来创建第一条吧！</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- 使用说明 -->
+        <section class="card info-section" aria-label="使用说明">
+            <h2 class="card__title">📖 功能说明</h2>
+            <div class="info-grid">
+                <div class="info-card">
+                    <div class="info-card__icon">🔍</div>
+                    <h3 class="info-card__title">核心功能</h3>
+                    <ul class="info-card__list">
+                        <li>输入长链接，生成短链接</li>
+                        <li>支持自定义短码（如 <code>my-link</code>）</li>
+                        <li>访问短链接自动重定向到原始链接</li>
+                        <li>自动记录每次访问次数</li>
+                    </ul>
+                </div>
+                <div class="info-card">
+                    <div class="info-card__icon">🛡️</div>
+                    <h3 class="info-card__title">安全设计</h3>
+                    <ul class="info-card__list">
+                        <li>仅支持 http/https 协议，防止非法协议</li>
+                        <li>短码格式严格校验，防止注入</li>
+                        <li>输入长度限制，防止恶意超长输入</li>
+                        <li>所有操作记录日志，支持回溯</li>
+                    </ul>
+                </div>
+                <div class="info-card">
+                    <div class="info-card__icon">⚙️</div>
+                    <h3 class="info-card__title">技术栈</h3>
+                    <ul class="info-card__list">
+                        <li>后端：Python Flask</li>
+                        <li>数据库：SQLite (+ SQLAlchemy ORM)</li>
+                        <li>前端：原生 HTML/CSS/JavaScript</li>
+                        <li>API 格式：RESTful JSON</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- 页脚 -->
+        <footer class="footer">
+            <p>短链接系统 · MVP 演示版 · <span id="footerYear"></span></p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

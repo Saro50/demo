@@ -1,0 +1,136 @@
+// ============================================================
+// BrowserMind — Prisma Schema
+// 
+// 数据模型说明：
+// 整个框架围绕「会话(Session)」展开，每次 LLM 驱动的探测
+// 对应一个 Session。Session 下包含一系列 ActionLog（执行记录）
+// 和 Observation（页面快照）。ProbeResult 关联到具体探测脚本
+// 的输出。
+//
+// 数据流转:
+//   LLM Intent → Session(goal)
+//     → ActionLog[] (每次动作)
+//       → ProbeResult[] (探针输出)
+//     → Observation[] (页面状态快照)
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ------------------------------------------------------------
+// Session — 一次完整的探测会话
+// ------------------------------------------------------------
+model Session {
+  id        String   @id @default(cuid())
+  status    String   @default("CREATED")
+  // CREATED | RUNNING | COMPLETED | FAILED | CANCELLED
+  
+  goal      String?  // 用户/LLM 设定的原始目标
+  url       String?  // 目标页面 URL
+  summary   String?  // 最终总结报告
+  
+  config    String?  // JSON: 会话级配置
+  error     String?  // 全局错误信息
+  
+  llmModel  String?  // 使用的 LLM 模型名称
+  totalSteps    Int      @default(0)
+  totalDuration Int?     // 总耗时 (ms)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  actions     ActionLog[]
+  observations Observation[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ------------------------------------------------------------
+// ActionLog — 每次动作的完整记录（核心日志实体）
+// ------------------------------------------------------------
+model ActionLog {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  stepNumber  Int
+  actionType  String
+  // navigate | click | type | select | scroll | hover
+  // | wait | evaluate | probe | snapshot | extract | assert
+  
+  actionInput   String  // JSON: 动作参数
+  actionOutput  String? // JSON: 执行结果
+  success       Boolean @default(false)
+  error         String?
+  
+  durationMs    Int     @default(0)
+  retryCount    Int     @default(0)
+  
+  llmIntent     String? // LLM 的原始意图文本
+  observationBefore String? // JSON: 动作前的观察引用
+  observationAfter  String? // JSON: 动作后的观察引用
+  
+  createdAt     DateTime @default(now())
+  
+  probeResults ProbeResult[]
+
+  @@index([sessionId, stepNumber])
+  @@index([sessionId, actionType])
+  @@index([createdAt])
+}
+
+// ------------------------------------------------------------
+// Observation — 页面状态快照
+// ------------------------------------------------------------
+model Observation {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  stepNumber  Int
+  
+  url         String
+  title       String?
+  viewport    String?  // JSON: { width, height }
+  
+  summary        String? // JSON: 页面摘要
+  pageStructure  String? // JSON: 压缩 DOM 结构
+  hotSpots       String? // JSON: 交互热点区域
+  
+  networkState  String? // JSON: 网络请求状态
+  consoleLogs   String? // JSON: 控制台日志
+  storageState  String? // JSON: cookies/localStorage
+  
+  screenshotPath String?
+  pageSourceHash String?
+  
+  createdAt     DateTime @default(now())
+
+  @@index([sessionId, stepNumber])
+  @@index([createdAt])
+}
+
+// ------------------------------------------------------------
+// ProbeResult — 探测脚本执行结果
+// ------------------------------------------------------------
+model ProbeResult {
+  id            String   @id @default(cuid())
+  actionLogId   String?
+  actionLog     ActionLog? @relation(fields: [actionLogId], references: [id], onDelete: Cascade)
+  
+  probeName     String
+  script        String?  // 实际注入的脚本
+  result        String   // JSON: 探针返回数据
+  resultSize    Int      // 返回数据大小 (bytes)
+  durationMs    Int      // 执行耗时 (ms)
+  success       Boolean  @default(true)
+  error         String?
+  
+  createdAt     DateTime @default(now())
+}

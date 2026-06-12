@@ -1,0 +1,58 @@
+{
+  "name": "browser-mind-mcp",
+  "version": "1.0.0",
+  "description": "基于 Playwright MCP 的 Web 页面智能探测框架 — 让 LLM 能理解网页结构",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "browser-mind-mcp": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "start:sse": "node dist/cli.js --transport sse --port 3100",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "playwright:install": "playwright install chromium",
+    "prepublishOnly": "npm run build && npm run prisma:generate"
+  },
+  "keywords": [
+    "playwright",
+    "mcp",
+    "llm",
+    "web-probing",
+    "testing",
+    "browser-automation",
+    "model-context-protocol"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "prisma",
+    "README.md"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "@playwright/mcp": "^0.0.76",
+    "@prisma/client": "^7.8.0",
+    "dotenv": "^17.4.2",
+    "pino": "^10.3.1",
+    "playwright": "^1.60.0",
+    "prisma": "^7.8.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "@types/pino": "^7.0.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LogSystem SDK 测试</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; padding: 24px; color: #333; }
+  h1 { font-size: 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 12px; font-size: 13px; }
+  .status.ok { background: #dcfce7; color: #15803d; }
+  .status.fail { background: #fce4ec; color: #c62828; }
+  .status.pending { background: #fff3e0; color: #e65100; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .card h3 { font-size: 14px; margin-bottom: 8px; color: #666; }
+  .card .value { font-size: 24px; font-weight: 600; }
+  .card .desc { font-size: 12px; color: #999; margin-top: 4px; }
+  .btn { padding: 8px 16px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; transition: all 0.15s; }
+  .btn:hover { opacity: 0.85; }
+  .btn-primary { background: #6366f1; color: #fff; }
+  .btn-danger { background: #ef4444; color: #fff; }
+  .btn-secondary { background: #e5e7eb; color: #374151; }
+  .btn-outline { background: #fff; color: #6366f1; border: 1px solid #6366f1; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .config-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .config-row label { font-size: 13px; color: #666; min-width: 80px; }
+  .config-row input { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; width: 260px; }
+  .config-row .btn { font-size: 13px; padding: 6px 14px; }
+  .log-entry { padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; display: flex; gap: 8px; }
+  .log-entry .time { color: #999; font-family: monospace; font-size: 12px; white-space: nowrap; }
+  .log-entry .level { font-weight: 600; min-width: 48px; }
+  .log-entry .level.debug { color: #9e9e9e; }
+  .log-entry .level.info { color: #2196f3; }
+  .log-entry .level.warn { color: #ff9800; }
+  .log-entry .level.error { color: #f44336; }
+  .log-entry .msg { color: #333; flex: 1; }
+  .user-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: #eef2ff; border-radius: 10px; font-size: 12px; color: #4338ca; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<h1>
+  📋 LogSystem SDK 测试
+  <span id="initStatus" class="status pending">未初始化</span>
+</h1>
+
+<!-- 后端配置 -->
+<div class="config-row">
+  <label>后端地址:</label>
+  <input id="endpoint" value="http://localhost:3100/api/logs" placeholder="http://localhost:3100/api/logs" />
+  <button class="btn btn-primary" onclick="initSDK()">初始化 SDK</button>
+</div>
+
+<!-- 用户标识 -->
+<div class="config-row">
+  <label>用户 ID:</label>
+  <input id="userIdInput" value="demo-user-001" placeholder="输入用户标识" />
+  <button class="btn btn-outline" onclick="setUserId()" disabled id="btnSetUser">设置用户</button>
+  <span id="userBadge" class="user-badge" style="display:none">👤 <span id="userDisplay"></span></span>
+</div>
+
+<!-- 操作按钮 -->
+<div class="toolbar">
+  <button class="btn btn-secondary" onclick="sendTrack()" disabled id="btnTrack">📊 埋点事件</button>
+  <button class="btn btn-danger" onclick="sendError()" disabled id="btnError">🚨 上报异常</button>
+  <button class="btn btn-secondary" onclick="sendInfo()" disabled id="btnInfo">ℹ️ 上报信息</button>
+  <button class="btn btn-secondary" onclick="triggerError()" disabled id="btnTriggerError">💥 触发 JS 错误</button>
+  <button class="btn btn-secondary" onclick="triggerRejection()" disabled id="btnRejection">💔 触发 Promise 拒绝</button>
+  <button class="btn btn-secondary" onclick="fetchTest()" disabled id="btnFetch">🌐 触发网络请求</button>
+</div>
+
+<!-- 状态卡片 -->
+<div class="grid" id="statsCards">
+  <div class="card"><h3>📤 总上报</h3><div class="value" id="statSent">0</div><div class="desc">调用 _capture 次数</div></div>
+  <div class="card"><h3>💾 队列中</h3><div class="value" id="statQueued">—</div><div class="desc">IndexedDB 待发送</div></div>
+  <div class="card"><h3>🎯 采样率</h3><div class="value" id="statSample">1.0</div><div class="desc">sampleRate</div></div>
+  <div class="card"><h3>👤 当前用户</h3><div class="value" id="statUser" style="font-size:18px">未设置</div><div class="desc">user_id 将附加到每条日志</div></div>
+</div>
+
+<!-- 最近日志 -->
+<div class="card">
+  <h3>最近 SDK 日志输出</h3>
+  <div id="logOutput" style="max-height:300px;overflow-y:auto"><div style="color:#999;text-align:center;padding:20px">SDK 初始化后开始记录</div></div>
+</div>
+
+<!-- 控制台输出 -->
+<div class="card" style="margin-top:12px">
+  <h3>浏览器控制台</h3>
+  <div style="font-size:12px;color:#999">在 DevTools Console 中过滤 <code>[LogSystem]</code> 查看 SDK 内部日志</div>
+</div>
+
+<script type="module">
+// ============================================================
+// SDK 测试页面
+// ============================================================
+import { Logger } from '@myby/log-sdk';
+
+let sentCount = 0;
+const logOutput = document.getElementById('logOutput');
+
+function logToUI(level, msg) {
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  const time = new Date().toLocaleTimeString('zh-CN', { hour12: false }) + '.' + String(Date.now() % 1000).padStart(3, '0');
+  div.innerHTML = `<span class="time">${time}</span><span class="level ${level}">${level}</span><span class="msg">${msg}</span>`;
+  logOutput.appendChild(div);
+  logOutput.scrollTop = logOutput.scrollHeight;
+}
+
+function updateSent() {
+  document.getElementById('statSent').textContent = sentCount;
+}
+
+function updateUserDisplay(userId) {
+  const statEl = document.getElementById('statUser');
+  const badge = document.getElementById('userBadge');
+  const display = document.getElementById('userDisplay');
+  if (userId) {
+    statEl.textContent = userId;
+    statEl.style.fontSize = '18px';
+    display.textContent = userId;
+    badge.style.display = 'inline-flex';
+  } else {
+    statEl.textContent = '未设置';
+    badge.style.display = 'none';
+  }
+}
+
+// 暴露到 window 供 onclick 调用
+window.initSDK = async function() {
+  const endpoint = document.getElementById('endpoint').value;
+  const statusEl = document.getElementById('initStatus');
+
+  try {
+    const healthUrl = endpoint.replace('/api/logs', '/api/health');
+    const res = await fetch(healthUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error('服务状态异常');
+  } catch (err) {
+    statusEl.className = 'status fail';
+    statusEl.textContent = `❌ 后端不可达: ${err.message}`;
+    return;
+  }
+
+  Logger.init({
+    endpoint,
+    appName: 'demo-test',
+    environment: 'test',
+    autoCapture: {
+      error: true,
+      promise: true,
+      request: true,
+      route: false,
+      performance: false,
+      click: false,
+    },
+  });
+
+  statusEl.className = 'status ok';
+  statusEl.textContent = '✅ 已初始化';
+
+  // 启用按钮
+  document.querySelectorAll('.toolbar .btn, #btnSetUser').forEach(b => b.disabled = false);
+
+  // 如果输入框中已有 userId，自动设置
+  const userId = document.getElementById('userIdInput').value.trim();
+  if (userId) {
+    Logger.setUserId(userId);
+    updateUserDisplay(userId);
+    logToUI('info', `设置用户: ${userId}`);
+  }
+
+  logToUI('info', 'SDK 初始化成功，上报地址: ' + endpoint);
+};
+
+window.setUserId = function() {
+  const userId = document.getElementById('userIdInput').value.trim();
+  if (!userId) {
+    logToUI('warn', '用户 ID 不能为空');
+    return;
+  }
+  Logger.setUserId(userId);
+  updateUserDisplay(userId);
+  sentCount++;
+  updateSent();
+  logToUI('info', `设置用户: ${userId}（后续日志自动携带 user_id）`);
+};
+
+window.sendTrack = function() {
+  sentCount++;
+  updateSent();
+  Logger.track('demo_button_click', { page: 'test-page', button_id: 'demo-btn-1' });
+  logToUI('info', 'track: demo_button_click');
+};
+
+window.sendError = function() {
+  sentCount++;
+  updateSent();
+  Logger.error('演示错误: 模拟业务异常', { code: 500, source: 'demo-test' });
+  logToUI('error', 'error: 演示错误');
+};
+
+window.sendInfo = function() {
+  sentCount++;
+  updateSent();
+  Logger.info('演示信息日志', { action: 'demo', value: Math.random() });
+  logToUI('info', 'info: 演示信息日志');
+};
+
+window.triggerError = function() {
+  sentCount++;
+  updateSent();
+  setTimeout(() => {
+    throw new Error('SDK 演示: 主动触发的 JS 运行时错误');
+  }, 100);
+  logToUI('warn', '触发了 JS 错误（100ms 后抛出）');
+};
+
+window.triggerRejection = function() {
+  sentCount++;
+  updateSent();
+  setTimeout(() => {
+    Promise.reject(new Error('SDK 演示: 未捕获的 Promise 拒绝'));
+  }, 100);
+  logToUI('warn', '触发了 Promise 拒绝（100ms 后触发）');
+};
+
+window.fetchTest = function() {
+  sentCount++;
+  updateSent();
+  fetch('https://httpbin.org/get?demo=1')
+    .then(r => r.json())
+    .then(d => logToUI('info', `fetch 成功: ${d.url}`))
+    .catch(e => logToUI('error', `fetch 失败: ${e.message}`));
+};
+</script>
+
+</body>
+</html>

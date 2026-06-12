@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+*.js
+!jest.config.js
+!.d.ts
+.DS_Store
+ui
+log/

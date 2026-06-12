@@ -1,0 +1,21 @@
+{
+  "name": "log-system",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:ui\"",
+    "dev:server": "cd packages/server && npm run dev",
+    "dev:ui": "cd packages/ui && npm run dev",
+    "build": "npm run build:shared && npm run build:sdk && npm run build:server && npm run build:ui",
+    "build:shared": "cd packages/shared && npm run build",
+    "build:sdk": "cd packages/sdk && npm run build",
+    "build:server": "cd packages/server && npm run build",
+    "build:ui": "cd packages/ui && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^8.0.0",
+    "typescript": "^5.3.0"
+  }
+}

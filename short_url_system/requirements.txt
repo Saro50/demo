@@ -1,0 +1,5 @@
+# 短链接系统 MVP 依赖
+# 安装方式：pip install -r requirements.txt
+
+flask>=3.0.0
+sqlalchemy>=2.0.0
